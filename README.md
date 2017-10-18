@@ -3,7 +3,7 @@
 This program wraps around the Mammoth python library to convert .docx to HTML, preserving all source style names as classes in the HTML and including original .docx style formatting information as attributes on the output HTML elements.
 
 ```
-$ python mammoth-mapper.py [--map] [--verbose] -i _filename_
+$ python mammoth-verbose.py [--map] [--verbose] -i _filename_
 ```
 
 ## Options
