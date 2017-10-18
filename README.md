@@ -6,7 +6,7 @@ This program wraps around the Mammoth python library to convert .docx to HTML, p
 $ python mammoth-mapper.py [--map] [--verbose] -i _filename_
 ```
 
-Options:
+## Options
 
 --map: Map source .docx style names to class names in the output HTML. Default is true.
 
@@ -19,3 +19,8 @@ For example:
 ```
 $ python mammoth-verbose.py --map --verbose -i /Users/hederis/Documents/alice.docx
 ```
+
+## To-Do
+
+* Add some validation to ensure input filename is docx
+* Add some validation to see if styles.xml file exists; if not, fail gracefully.
