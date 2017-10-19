@@ -112,7 +112,11 @@ def addAttrs(html, myDict):
     for para in root.findall(".//p[@class='" + style + "']"):
       for key, val in vals.iteritems():
         para.attrib[key] = val
-  plainHTML = etree.tostring(root)
+  newHTML = etree.tostring(root, encoding="UTF-8", standalone=True, xml_declaration=True)
+  return newHTML
+
+def sanitizeHTML(html):
+  root = etree.HTML(html)
   newHTML = etree.tostring(root, encoding="UTF-8", standalone=True, xml_declaration=True)
   return newHTML
 
@@ -143,6 +147,8 @@ messages = result.messages
 # add the verbose attributes to the output HTML if requested
 if args.preserveFormatting == True:
   html = addAttrs(html, verboseAttrs)
+else:
+  html = sanitizeHTML(html)
 
 # write to a new HTML document
 output = open('output.html', 'w')
