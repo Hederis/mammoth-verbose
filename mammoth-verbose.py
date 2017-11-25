@@ -2,6 +2,7 @@ from sys import argv
 from lxml import etree, objectify
 from lxml.builder import E
 from lxml.builder import ElementMaker
+import shutil
 import argparse
 import os.path
 import mammoth
@@ -27,14 +28,19 @@ parser.add_argument('--verbose', dest='preserveFormatting', action='store_true',
 args = parser.parse_args()
 
 docxfile = args.filename
+fileName = docxfile.name
 
 # an empty dict for our ultimate parsed data
 verboseAttrs = {}
 
 # function to read the styles.xml file from within the docx;
 # this is used for extracting style names and formatting information.
-def getWordStyles(file):
-  zip = zipfile.ZipFile(file)
+def getWordStyles(myfile):
+  fileName = myfile.name
+  filePath = os.path.splitext(myfile.name)[0]
+  newName = filePath + ".zip"
+  shutil.copyfile(fileName, newName)
+  zip = zipfile.ZipFile(newName)
   xml_content = zip.read('word/styles.xml')
   return xml_content
 
@@ -71,9 +77,9 @@ def walkChildren(element, inputKey="data", inputVal="", inputDict={}):
 # bringing together getWordStyles, getAttrs, and walkChildren
 # to create the final verboseDict of all style names and their
 # formatting information.
-def getAllStyles(file):
+def getAllStyles(myfile):
   # parse the incoming XML
-  source = getWordStyles(file)
+  source = getWordStyles(myfile)
   root = etree.fromstring(source)
 
   allStyles = {}
@@ -108,9 +114,9 @@ def getAllStyles(file):
 # add the formatting info back to the HTML as attributes on each element
 def addAttrs(html, myDict):
   root = etree.HTML(html)
-  for style, vals in myDict.iteritems():
+  for style, vals in myDict.items():
     for para in root.findall(".//p[@class='" + style + "']"):
-      for key, val in vals.iteritems():
+      for key, val in vals.items():
         para.attrib[key] = val
   newHTML = etree.tostring(root, encoding="UTF-8", standalone=True, xml_declaration=True)
   return newHTML
@@ -125,7 +131,7 @@ verboseAttrs = getAllStyles(docxfile)
 # create the style map if requested
 if args.mapStyles == True:
   style_map = '"""'
-  for style, vals in verboseAttrs.iteritems():
+  for style, vals in verboseAttrs.items():
     sourceName = vals['data-name']
     destName = style
     # mapping paragraphs
@@ -140,7 +146,8 @@ if args.mapStyles == True:
   style_map = style_map + '\n"""'
 
 # convert with mammoth
-result = mammoth.convert_to_html(docxfile, style_map=style_map)
+fobj = open(fileName,'rb')
+result = mammoth.convert_to_html(fobj, style_map=style_map)
 html = result.value
 messages = result.messages
 
@@ -152,5 +159,5 @@ else:
 
 # write to a new HTML document
 output = open('output.html', 'w')
-output.write(html)
+output.write(str(html))
 output.close()
