@@ -2,11 +2,14 @@ from sys import argv
 from lxml import etree, objectify
 from lxml.builder import E
 from lxml.builder import ElementMaker
+from docx import Document
+from docx.shared import Inches, Pt
 import shutil
 import argparse
 import os.path
 import mammoth
 import zipfile
+import inspect
 
 # function to check if the input file is valid
 def is_valid_file(parser, arg):
@@ -111,6 +114,50 @@ def getAllStyles(myfile):
 
   return allStyles
 
+def getAttr(self):
+  for attr in self:
+      value = getattr(format, attr, None)
+      if value != None:
+        print(attr, value)
+
+def getDirectFormatting(myfile):
+  fobj = open(myfile,'rb')
+  document = Document(fobj)
+  paragraphs = document.paragraphs
+  for para in paragraphs:
+    # Get paragraph formatting
+    format = para.paragraph_format
+    sublist = [a for a in dir(format) if not a.startswith('_') and a != 'element' and a != 'tab_stops']
+    for attr in sublist:
+      value = getattr(format, attr, None)
+      if value != None:
+        print(attr, ": ", value)
+        # TO DO: do something with paragraph formatting
+    # for attr in sublist:
+    #   selector = "format." + attr
+    #   val = selector
+    #   print(attr, ": ", val)
+    #print(sublist)
+    # for attr in sublist:
+    #   val = format[attr]
+    #   print(attr + ": " + val)
+      # add to new style def
+    runs = para.runs
+    for run in runs:
+      font = run.font
+      sublist = [a for a in dir(font) if not a.startswith('_') and a != 'element']
+      for attr in sublist:
+        value = getattr(font, attr, None)
+        if attr == 'color':
+          ssublist = [a for a in dir(attr) if not a.startswith('_') and a != 'element']
+          for sattr in ssublist:
+            svalue = getattr(attr, sattr, None)
+            print(sattr, ": ", svalue)
+        if value != None:
+          print(attr, ": ", value)
+      # for key, val in font.items():
+      #   print(key + ": " + val)
+
 # add the formatting info back to the HTML as attributes on each element
 def addAttrs(html, myDict):
   root = etree.HTML(html)
@@ -125,6 +172,8 @@ def sanitizeHTML(html):
   root = etree.HTML(html)
   newHTML = etree.tostring(root, encoding="UTF-8", standalone=True, xml_declaration=True)
   return newHTML
+
+getDirectFormatting(fileName)
 
 verboseAttrs = getAllStyles(docxfile)
 
