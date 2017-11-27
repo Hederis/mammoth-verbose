@@ -4,6 +4,7 @@ from lxml.builder import E
 from lxml.builder import ElementMaker
 from docx import Document
 from docx.shared import Inches, Pt
+from docx.text.run import Font, Run
 import shutil
 import argparse
 import os.path
@@ -124,14 +125,31 @@ def getDirectFormatting(myfile):
   fobj = open(myfile,'rb')
   document = Document(fobj)
   paragraphs = document.paragraphs
+  parastyles = {}
   for para in paragraphs:
     # Get paragraph formatting
     format = para.paragraph_format
     sublist = [a for a in dir(format) if not a.startswith('_') and a != 'element' and a != 'tab_stops']
-    for attr in sublist:
-      value = getattr(format, attr, None)
-      if value != None:
-        print(attr, ": ", value)
+    parastyles['alignment'] = para.paragraph_format.alignment
+    #Element is assumed to be w:p
+    #parastyles['element'] = para.paragraph_format.element
+    parastyles['first_line_indent'] = para.paragraph_format.first_line_indent
+    parastyles['keep_together'] = para.paragraph_format.keep_together
+    parastyles['keep_with_next'] = para.paragraph_format.keep_with_next
+    parastyles['left_indent'] = para.paragraph_format.left_indent
+    parastyles['line_spacing'] = para.paragraph_format.line_spacing
+    parastyles['line_spacing_rule'] = para.paragraph_format.line_spacing_rule
+    parastyles['page_break_before'] = para.paragraph_format.page_break_before
+    #parastyles['part'] = para.paragraph_format.part
+    parastyles['right_indent'] = para.paragraph_format.right_indent
+    parastyles['space_after'] = para.paragraph_format.space_after
+    parastyles['space_before'] = para.paragraph_format.space_before
+    #We'll ignore tab stops for now
+    #parastyles['tab_stops'] = para.paragraph_format.tab_stops
+    parastyles['widow_control'] = para.paragraph_format.widow_control
+    for key,val in parastyles.items():
+      if val != None:
+        print(key, ": ", val)
         # TO DO: do something with paragraph formatting
     # for attr in sublist:
     #   selector = "format." + attr
@@ -143,18 +161,44 @@ def getDirectFormatting(myfile):
     #   print(attr + ": " + val)
       # add to new style def
     runs = para.runs
+    charstyles = {}
     for run in runs:
       font = run.font
       sublist = [a for a in dir(font) if not a.startswith('_') and a != 'element']
+      charstyles['all_caps'] = run.font.all_caps
+      charstyles['bold'] = run.font.bold
+      charstyles['color'] = run.font.color.rgb
+      charstyles['complex_script'] = run.font.complex_script
+      charstyles['cs_bold'] = run.font.cs_bold
+      charstyles['cs_italic'] = run.font.cs_italic
+      charstyles['double_strike'] = run.font.double_strike
+      charstyles['emboss'] = run.font.emboss
+      charstyles['hidden'] = run.font.hidden
+      charstyles['highlight_color'] = run.font.highlight_color
+      charstyles['imprint'] = run.font.imprint
+      charstyles['italic'] = run.font.italic
+      charstyles['math'] = run.font.math
+      charstyles['name'] = run.font.name
+      charstyles['no_proof'] = run.font.no_proof
+      charstyles['outline'] = run.font.outline
+      charstyles['part'] = run.font.part
+      charstyles['rtl'] = run.font.rtl
+      charstyles['shadow'] = run.font.shadow
+      charstyles['size'] = run.font.size
+      charstyles['small_caps'] = run.font.small_caps
+      charstyles['snap_to_grid'] = run.font.snap_to_grid
+      charstyles['spec_vanish'] = run.font.spec_vanish
+      charstyles['strike'] = run.font.strike
+      charstyles['subscript'] = run.font.subscript
+      charstyles['superscript'] = run.font.superscript
+      charstyles['underline'] = run.font.underline
+      charstyles['web_hidden'] = run.font.web_hidden
+      print(sublist)
       for attr in sublist:
         value = getattr(font, attr, None)
-        if attr == 'color':
-          ssublist = [a for a in dir(attr) if not a.startswith('_') and a != 'element']
-          for sattr in ssublist:
-            svalue = getattr(attr, sattr, None)
-            print(sattr, ": ", svalue)
         if value != None:
-          print(attr, ": ", value)
+          pass
+          #print(attr, ": ", value)
       # for key, val in font.items():
       #   print(key + ": " + val)
 
