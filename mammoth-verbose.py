@@ -44,12 +44,33 @@ verboseAttrs = {}
 
 # function to read the styles.xml file from within the docx;
 # this is used for extracting style names and formatting information.
-def makeZip(myfile):
+
+def getNameAndPath(myfile):
   fileName = myfile.name
   filePath = os.path.splitext(myfile.name)[0]
+  return fileName, filePath
+
+def makeZip(myfile):
+  fileName, filePath = getNameAndPath(myfile)
   newName = filePath + ".zip"
   shutil.copyfile(fileName, newName)
   return newName
+
+def unZip(myfile):
+  fileName, filePath = getNameAndPath(myfile)
+  document = zipfile.ZipFile(myfile, 'a')
+  document.extractall(filePath)
+  document.close()
+  return
+
+def zipDocx(path, myfile):
+  zf = zipfile.ZipFile(myfile, "w")
+  for dirname, subdirs, files in os.walk(path):
+      zf.write(dirname)
+      for filename in files:
+          zf.write(os.path.join(dirname, filename))
+  zf.close()
+  return
 
 def getWordStyles(myzip):
   zip = zipfile.ZipFile(myzip)
@@ -96,8 +117,9 @@ def walkChildren(element, inputKey="data", inputVal="", inputDict={}):
 # formatting information.
 def getAllStyles(myfile):
   # parse the incoming XML
-  myzip = makeZip(myfile)
-  source = getWordStyles(myzip)
+  #myzip = makeZip(myfile)
+  #source = getWordStyles(myzip)
+  source = getWordStyles(myfile)
   root = etree.fromstring(source)
 
   allStyles = {}
@@ -155,25 +177,14 @@ def getDirectFormatting(myfile):
   NSMAP = {None : WORD_NAMESPACE}
 
   E = ElementMaker(namespace="http://schemas.openxmlformats.org/wordprocessingml/2006/main",
-                   nsmap={'w' : "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
-                          'w14' : "http://schemas.microsoft.com/office/word/2010/wordml",
-                          'wpc' : "http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas",
-                          'mc' : "http://schemas.openxmlformats.org/markup-compatibility/2006",
-                          'o' : "urn:schemas-microsoft-com:office:office",
+                   nsmap={'mc' : "http://schemas.openxmlformats.org/markup-compatibility/2006",
                           'r' : "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-                          'm' : "http://schemas.openxmlformats.org/officeDocument/2006/math",
-                          'v' : "urn:schemas-microsoft-com:vml",
-                          'wp14' : "http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing",
-                          'wp' : "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
-                          'w10' : "urn:schemas-microsoft-com:office:word",
-                          'wpg' : "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup",
-                          'wpi' : "http://schemas.microsoft.com/office/word/2010/wordprocessingInk",
-                          'wne' : "http://schemas.microsoft.com/office/word/2006/wordml",
-                          'wps' : "http://schemas.microsoft.com/office/word/2010/wordprocessingShape"})
+                          'w' : "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+                          'w14' : "http://schemas.microsoft.com/office/word/2010/wordml"})
 
   newstyles = []
   modcounter = 1
-  for para in root.findall(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p") :
+  for para in root.findall(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"):
     # get all formatting on the P (inside pPr)
     para_format = para.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr")
     formatting = para.xpath(".//w:pPr/w:*[not(self::w:pStyle)]", namespaces={'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'})
@@ -214,6 +225,8 @@ def getDirectFormatting(myfile):
           PPROBJ()
         )
 
+        newstyle.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type", "paragraph")
+
       # set the para stylename to the new stylename
       print(newstylename)
       stylename = para.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pStyle")
@@ -224,149 +237,104 @@ def getDirectFormatting(myfile):
       for format in formatting:
         print(format.tag)
         if newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr/" + format.tag) is not None:
+          currel = newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr/" + format.tag)
           # copy over just the parts of the element that are different from the existing version
           allchildren = format.xpath("w:*", namespaces={'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'})
-          print(etree.tostring(format.tag), " exists")
+          for att in format.attrib:
+            currel.set(att, format.attrib[att])
+          for child in allchildren:
+            if currel.find(child.tag) is not None:
+              currchild = currel.find(child.tag)
+              for att in child.attrib:
+                currchild.set(att, child.attrib[att])
+            else:
+              currel.append(child)
         elif format.tag == "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr":
-          newstyle.append(format)
+          currel = newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr")
+          for att in format.attrib:
+            currel.set(att, node.attrib[att])
         else:
           newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr").append(format)
       # add new style to list
       stylelist = styles_root.append(newstyle)
       modcounter += 1
+    
+    for run in para.findall("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r"):
+      # get all formatting on the P (inside pPr)
+      run_format = run.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr")
+      formatting = run.xpath(".//w:rPr/w:*[not(self::w:rStyle)]", namespaces={'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'})
+      style = run.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rStyle")
+      if formatting:
+        if style is not None:
+          # if there are any non-pstyle children of run_format, 
+          # then proceed with modifications
+          stylename = style.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val")
+          newstylename = stylename + "HEDmod" + str(modcounter)
+          currstyle = styles_root.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}style[@{http://schemas.openxmlformats.org/wordprocessingml/2006/main}styleId='" + stylename + "']")
+          newstyle = deepcopy(currstyle)
+          if newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}basedOn") is not None:
+            newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}basedOn").set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", stylename)
+          else:
+            newbasedon = etree.Element(w + "basedOn", nsmap=NSMAP)
+            newbasedon.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", stylename)
+            newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}name").addnext(newbasedon)
+          if newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr") is None:
+            newrpr = etree.Element(w + "rPr", nsmap=NSMAP)
+            newstyle.append(newrpr)
+        else:
+          # add the rStyle element to the run
+          if run_format is None:
+            newrpr = etree.Element(w + "rPr", nsmap=NSMAP)
+            run.insert(0, newrpr)
+
+          newrstyle = etree.Element(w + "rStyle", nsmap=NSMAP)
+          run.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr").append(newrstyle)
+
+          newstylename = "HEDmod" + str(modcounter)
+          STYLEOBJ = E.style
+          STYLENAMEOBJ = E.name
+          RPROBJ = E.rPr
+
+          newstyle = STYLEOBJ(
+            STYLENAMEOBJ(),
+            RPROBJ()
+          )
+
+          newstyle.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type", "character")
+
+        # set the run stylename to the new stylename
+        print(newstylename)
+        stylename = run.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rStyle")
+        stylename.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", newstylename)
+        # create new style
+        newstyle.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}styleId", newstylename)
+        newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}name").set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", newstylename)
+        for format in formatting:
+          print(format.tag)
+          if newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr/" + format.tag) is not None:
+            currel = newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr/" + format.tag)
+            # copy over just the parts of the element that are different from the existing version
+            allchildren = format.xpath("w:*", namespaces={'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'})
+            for att in format.attrib:
+              currel.set(att, format.attrib[att])
+            for child in allchildren:
+              if currel.find(child.tag) is not None:
+                currchild = currel.find(child.tag)
+                for att in child.attrib:
+                  currchild.set(att, child.attrib[att])
+              else:
+                currel.append(child)
+          elif format.tag == "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr":
+            currel = newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr")
+            for att in format.attrib:
+              currel.set(att, node.attrib[att])
+          else:
+            newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr").append(format)
+        # add new style to list
+        stylelist = styles_root.append(newstyle)
+        modcounter += 1
 
   return root, styles_root
-
-    
-#     for child in para_format.iterdescendants():
-#       inStyle = currstyle.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}" + child)
-#       if inStyle:
-#         inStyle[]
-#       else:
-#         currstyle.append(child)
-
-#     currstyle = styles_root.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}style[@{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val='" + stylename + "']")
-#     for child in currstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr").iterdescendants():
-#       pass
-#     if currstyle.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}" + child):
-#       # if item already exists in parent, set all attributes equal to new values
-#     else:
-#       # if item does not exist in parent, append it
-#     for run in 
-
-
-# <w:p w14:paraId="0EA1567D" w14:textId="4F0362F5" w:rsidR="00637946" w:rsidRDefault="00637946" w:rsidP="00661D3A">
-# <w:pPr><w:pBdr><w:left w:val="single" w:sz="48" w:space="4" w:color="CCFFCC"/></w:pBdr><w:shd w:val="clear" w:color="auto" w:fill="339966"/><w:jc w:val="center"/><w:pStyle w:val="Text-Standardtx"/></w:pPr>
-# <w:pPr><w:pBdr><w:left w:val="wave" w:sz="12" w:space="4" w:color="FF6666"/></w:pBdr><w:spacing w:line="480" w:lineRule="auto"/><w:ind w:firstLine="720"/></w:pPr>
-
-# <w:style w:type="paragraph" w:customStyle="1" w:styleId="FrontSalesQuotefsq">
-#   <w:name w:val="Front Sales Quote (fsq)"/>
-#   <w:basedOn w:val="Normal"/> -- styleID
-#   <w:rsid w:val="0002472B"/>
-#   <w:pPr><w:pBdr><w:left w:val="wave" w:sz="12" w:space="4" w:color="FF6666"/></w:pBdr><w:spacing w:line="480" w:lineRule="auto"/><w:ind w:firstLine="720"/></w:pPr>
-#   <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/></w:rPr>
-# </w:style>
-
-# def getDirectFormatting(document):
-#   #fobj = open(myfile,'rb')
-#   #document = Document(fobj)
-#   paragraphs = document.paragraphs
-#   styles = document.styles
-#   modcount = 1
-#   for para in paragraphs:
-#     parastyles = {}
-#     actualparastyles = {}
-#     # Get paragraph formatting
-#     format = para.paragraph_format
-#     sublist = [a for a in dir(format) if not a.startswith('_') and a != 'element' and a != 'tab_stops']
-#     parastyles['alignment'] = para.paragraph_format.alignment
-#     #Element is assumed to be w:p
-#     #parastyles['element'] = para.paragraph_format.element
-#     parastyles['first_line_indent'] = para.paragraph_format.first_line_indent
-#     parastyles['keep_together'] = para.paragraph_format.keep_together
-#     parastyles['keep_with_next'] = para.paragraph_format.keep_with_next
-#     parastyles['left_indent'] = para.paragraph_format.left_indent
-#     parastyles['line_spacing'] = para.paragraph_format.line_spacing
-#     parastyles['line_spacing_rule'] = para.paragraph_format.line_spacing_rule
-#     parastyles['page_break_before'] = para.paragraph_format.page_break_before
-#     #parastyles['part'] = para.paragraph_format.part
-#     parastyles['right_indent'] = para.paragraph_format.right_indent
-#     parastyles['space_after'] = para.paragraph_format.space_after
-#     parastyles['space_before'] = para.paragraph_format.space_before
-#     #parastyles['tab_stops'] = para.paragraph_format.tab_stops
-#     parastyles['widow_control'] = para.paragraph_format.widow_control
-#     for key,val in parastyles.items():
-#       if val != None:
-#         actualparastyles[key] = val
-#         # TO DO: do something with paragraph formatting
-#     if bool(actualparastyles) == True:
-#       if para.style.name != None:
-#         newstyle = para.style.name + "HEDmod" + str(modcount)
-#         style = styles.add_style(newstyle, WD_STYLE_TYPE.PARAGRAPH)
-#         style.base_style = styles[para.style.name]
-#       else:
-#         newstyle = "HEDmod" + str(modcount)
-#         style = styles.add_style(newstyle, WD_STYLE_TYPE.PARAGRAPH)
-#       paragraph_format = style.paragraph_format
-#       for key,val in actualparastyles.items():
-#         setattr(paragraph_format, key, val)
-#       para.style = newstyle
-#       modcount +=1
-#       #style = styles.add_style(newstyle, WD_STYLE_TYPE.PARAGRAPH)
-#     runs = para.runs
-#     for run in runs:
-#       font = run.font
-#       charstyles = {}
-#       actualcharstyles = {}
-#       sublist = [a for a in dir(font) if not a.startswith('_') and a != 'element']
-#       charstyles['all_caps'] = run.font.all_caps
-#       charstyles['bold'] = run.font.bold
-#       charstyles['color'] = run.font.color.rgb
-#       charstyles['complex_script'] = run.font.complex_script
-#       charstyles['cs_bold'] = run.font.cs_bold
-#       charstyles['cs_italic'] = run.font.cs_italic
-#       charstyles['double_strike'] = run.font.double_strike
-#       charstyles['emboss'] = run.font.emboss
-#       charstyles['hidden'] = run.font.hidden
-#       charstyles['highlight_color'] = run.font.highlight_color
-#       charstyles['imprint'] = run.font.imprint
-#       charstyles['italic'] = run.font.italic
-#       charstyles['math'] = run.font.math
-#       charstyles['name'] = run.font.name
-#       charstyles['no_proof'] = run.font.no_proof
-#       charstyles['outline'] = run.font.outline
-#       #charstyles['part'] = run.font.part
-#       charstyles['rtl'] = run.font.rtl
-#       charstyles['shadow'] = run.font.shadow
-#       charstyles['size'] = run.font.size
-#       charstyles['small_caps'] = run.font.small_caps
-#       charstyles['snap_to_grid'] = run.font.snap_to_grid
-#       charstyles['spec_vanish'] = run.font.spec_vanish
-#       charstyles['strike'] = run.font.strike
-#       charstyles['subscript'] = run.font.subscript
-#       charstyles['superscript'] = run.font.superscript
-#       charstyles['underline'] = run.font.underline
-#       charstyles['web_hidden'] = run.font.web_hidden
-#       for key,val in charstyles.items():
-#         if val != None:
-#           actualcharstyles[key] = val
-#       if bool(actualcharstyles) == True:
-#         if run.style.name != None and run.style.name != 'Default Paragraph Font':
-#           newstyle = run.style.name + "HEDmod" + str(modcount)
-#           style = styles.add_style(newstyle, WD_STYLE_TYPE.CHARACTER)
-#           style.base_style = styles[run.style.name]
-#         else:
-#           newstyle = "HEDmod" + str(modcount)
-#           style = styles.add_style(newstyle, WD_STYLE_TYPE.CHARACTER)
-#         for key,val in actualcharstyles.items():
-#           if key == 'color':
-#             style.font.color.rgb = run.font.color.rgb
-#             style.font.color.theme_color = run.font.color.theme_color
-#           else:
-#             setattr(style.font, key, val)
-#         run.style = newstyle
-#         modcount +=1
-#   return document
 
 # add the formatting info back to the HTML as attributes on each element
 def addAttrs(html, myDict):
@@ -388,21 +356,35 @@ document = Document(fobj)
 
 documentxml, stylesxml = getDirectFormatting(fobj)
 
+unZip(fobj)
+
+fobj.close()
+
+filePath = os.path.splitext(fobj.name)[0]
+
+docfilePath = os.path.join(filePath, "word", "document.xml")
+stylesfilePath = os.path.join(filePath, "word", "styles.xml")
+
 # write to a new document
-docfile = open('document2.xml', 'wb')
+docfile = open(docfilePath, 'wb')
 docfile.write(etree.tostring(documentxml, encoding="UTF-8", standalone=True, xml_declaration=True))
 docfile.close()
 
 # write to a new document
-stylesfile = open('styles2.xml', 'wb')
+stylesfile = open(stylesfilePath, 'wb')
 stylesfile.write(etree.tostring(stylesxml, encoding="UTF-8", standalone=True, xml_declaration=True))
 stylesfile.close()
 
-document.save('tmp.docx')
-newfile = open('tmp.docx','rb')
+newZipName = fileName + ".zip"
+
+print(filePath)
+
+zipDocx(filePath, newZipName)
+
+fobj = open(newZipName,'rb')
 
 #verboseAttrs = getAllStyles(docxfile)
-verboseAttrs = getAllStyles(newfile)
+verboseAttrs = getAllStyles(fobj)
 
 # create the style map if requested
 if args.mapStyles == True:
@@ -422,8 +404,7 @@ if args.mapStyles == True:
   style_map = style_map + '\n"""'
 
 # convert with mammoth
-result = mammoth.convert_to_html(newfile, style_map=style_map)
-#result = mammoth.convert_to_html(fobj, style_map=style_map)
+result = mammoth.convert_to_html(fobj, style_map=style_map)
 html = result.value
 messages = result.messages
 
