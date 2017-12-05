@@ -20,6 +20,8 @@ For example:
 $ python mammoth-verbose.py --map --verbose -i /Users/hederis/Documents/alice.docx
 ```
 
+The output html file will be created in the same directory as the input docx file.
+
 ## To-Do
 
 * Add some validation to ensure input filename is docx
