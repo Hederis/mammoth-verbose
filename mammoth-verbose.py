@@ -2,11 +2,16 @@ from sys import argv
 from lxml import etree, objectify
 from lxml.builder import E
 from lxml.builder import ElementMaker
+import xml.etree.ElementTree as ET
 import shutil
 import argparse
 import os.path
 import mammoth
 import zipfile
+import inspect
+import copy
+import html
+from copy import deepcopy
 
 # function to check if the input file is valid
 def is_valid_file(parser, arg):
@@ -29,19 +34,50 @@ args = parser.parse_args()
 
 docxfile = args.filename
 fileName = docxfile.name
+fileNameNoExt = fileName.split(".")[0]
 
 # an empty dict for our ultimate parsed data
 verboseAttrs = {}
 
 # function to read the styles.xml file from within the docx;
 # this is used for extracting style names and formatting information.
-def getWordStyles(myfile):
+
+def getNameAndPath(myfile):
   fileName = myfile.name
   filePath = os.path.splitext(myfile.name)[0]
+  return fileName, filePath
+
+def makeZip(myfile):
+  fileName, filePath = getNameAndPath(myfile)
   newName = filePath + ".zip"
   shutil.copyfile(fileName, newName)
-  zip = zipfile.ZipFile(newName)
+  return newName
+
+def unZip(myfile):
+  fileName, filePath = getNameAndPath(myfile)
+  document = zipfile.ZipFile(myfile, 'a')
+  document.extractall(filePath)
+  document.close()
+  return
+
+def zipDocx(path, myfile):
+  os.chdir(path)
+  zf = zipfile.ZipFile(myfile, "w")
+  for dirname, subdirs, files in os.walk("."):
+    zf.write(dirname)
+    for filename in files:
+      zf.write(os.path.join(dirname, filename))
+  zf.close()
+  return
+
+def getWordStyles(myzip):
+  zip = zipfile.ZipFile(myzip)
   xml_content = zip.read('word/styles.xml')
+  return xml_content
+
+def getWordText(myzip):
+  zip = zipfile.ZipFile(myzip)
+  xml_content = zip.read('word/document.xml')
   return xml_content
 
 # get all the formatting attributes for a style
@@ -79,6 +115,8 @@ def walkChildren(element, inputKey="data", inputVal="", inputDict={}):
 # formatting information.
 def getAllStyles(myfile):
   # parse the incoming XML
+  #myzip = makeZip(myfile)
+  #source = getWordStyles(myzip)
   source = getWordStyles(myfile)
   root = etree.fromstring(source)
 
@@ -86,6 +124,7 @@ def getAllStyles(myfile):
   # get all paragraph styles
   for style in root.findall(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}style[@{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type='paragraph']") :
     styleID = style.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}styleId")
+    styleID = styleID.replace("(","").replace(")","")
     # reset the dictionary for this style's children
     allAttr = {}
     # get all child elements of the style
@@ -111,6 +150,180 @@ def getAllStyles(myfile):
 
   return allStyles
 
+# run this function before style map and getting style defs
+def getDirectFormatting(myfile):
+  myzip = makeZip(myfile)
+  source = getWordText(myzip)
+  root = etree.fromstring(source)
+
+  styles_source = getWordStyles(myzip)
+  styles_root = etree.fromstring(styles_source)
+
+  # namespace declarations for the element method we'll use later
+  WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+  w = "{%s}" % WORD_NAMESPACE
+
+  WORD14_NAMESPACE = "http://schemas.microsoft.com/office/word/2010/wordml"
+  w14 = "{%s}" % WORD_NAMESPACE
+
+  NSMAP = {None : WORD_NAMESPACE}
+
+  E = ElementMaker(namespace="http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+                   nsmap={'mc' : "http://schemas.openxmlformats.org/markup-compatibility/2006",
+                          'r' : "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+                          'w' : "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+                          'w14' : "http://schemas.microsoft.com/office/word/2010/wordml"})
+
+  newstyles = []
+  modcounter = 1
+  for para in root.findall(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"):
+    # get all formatting on the P (inside pPr)
+    para_format = para.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr")
+    formatting = para.xpath(".//w:pPr/w:*[not(self::w:pStyle)]", namespaces={'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'})
+    style = para.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pStyle")
+    if formatting:
+      if style is not None:
+        # if there are any non-pstyle children of para_format, 
+        # then proceed with modifications
+        stylename = style.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val")
+        newstylename = stylename + "HEDmod" + str(modcounter)
+        currstyle = styles_root.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}style[@{http://schemas.openxmlformats.org/wordprocessingml/2006/main}styleId='" + stylename + "']")
+        newstyle = deepcopy(currstyle)
+        if newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}basedOn") is not None:
+          newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}basedOn").set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", stylename)
+        else:
+          newbasedon = etree.Element(w + "basedOn", nsmap=NSMAP)
+          newbasedon.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", stylename)
+          newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}name").addnext(newbasedon)
+        if newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr") is None:
+          newppr = etree.Element(w + "pPr", nsmap=NSMAP)
+          newstyle.append(newppr)
+      else:
+        # add the pStyle element to the para
+        if para_format is None:
+          newppr = etree.Element(w + "pPr", nsmap=NSMAP)
+          para.insert(0, newppr)
+
+        newpstyle = etree.Element(w + "pStyle", nsmap=NSMAP)
+        para.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr").append(newpstyle)
+
+        newstylename = "HEDmod" + str(modcounter)
+        STYLEOBJ = E.style
+        STYLENAMEOBJ = E.name
+        PPROBJ = E.pPr
+
+        newstyle = STYLEOBJ(
+          STYLENAMEOBJ(),
+          PPROBJ()
+        )
+
+        newstyle.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type", "paragraph")
+
+      # set the para stylename to the new stylename
+      stylename = para.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pStyle")
+      stylename.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", newstylename)
+      # create new style
+      newstyle.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}styleId", newstylename)
+      newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}name").set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", newstylename)
+      for format in formatting:
+        if newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr/" + format.tag) is not None:
+          currel = newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr/" + format.tag)
+          # copy over just the parts of the element that are different from the existing version
+          allchildren = format.xpath("w:*", namespaces={'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'})
+          for att in format.attrib:
+            currel.set(att, format.attrib[att])
+          for child in allchildren:
+            if currel.find(child.tag) is not None:
+              currchild = currel.find(child.tag)
+              for att in child.attrib:
+                currchild.set(att, child.attrib[att])
+            else:
+              currel.append(child)
+        elif format.tag == "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr":
+          currel = newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr")
+          for att in format.attrib:
+            currel.set(att, node.attrib[att])
+        else:
+          newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr").append(format)
+      # add new style to list
+      stylelist = styles_root.append(newstyle)
+      modcounter += 1
+    
+    for run in para.findall("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r"):
+      # get all formatting on the P (inside pPr)
+      run_format = run.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr")
+      formatting = run.xpath(".//w:rPr/w:*[not(self::w:rStyle)]", namespaces={'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'})
+      style = run.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rStyle")
+      if formatting:
+        if style is not None:
+          # if there are any non-pstyle children of run_format, 
+          # then proceed with modifications
+          stylename = style.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val")
+          newstylename = stylename + "HEDmod" + str(modcounter)
+          currstyle = styles_root.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}style[@{http://schemas.openxmlformats.org/wordprocessingml/2006/main}styleId='" + stylename + "']")
+          newstyle = deepcopy(currstyle)
+          if newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}basedOn") is not None:
+            newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}basedOn").set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", stylename)
+          else:
+            newbasedon = etree.Element(w + "basedOn", nsmap=NSMAP)
+            newbasedon.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", stylename)
+            newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}name").addnext(newbasedon)
+          if newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr") is None:
+            newrpr = etree.Element(w + "rPr", nsmap=NSMAP)
+            newstyle.append(newrpr)
+        else:
+          # add the rStyle element to the run
+          if run_format is None:
+            newrpr = etree.Element(w + "rPr", nsmap=NSMAP)
+            run.insert(0, newrpr)
+
+          newrstyle = etree.Element(w + "rStyle", nsmap=NSMAP)
+          run.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr").append(newrstyle)
+
+          newstylename = "HEDmod" + str(modcounter)
+          STYLEOBJ = E.style
+          STYLENAMEOBJ = E.name
+          RPROBJ = E.rPr
+
+          newstyle = STYLEOBJ(
+            STYLENAMEOBJ(),
+            RPROBJ()
+          )
+
+          newstyle.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type", "character")
+
+        # set the run stylename to the new stylename
+        stylename = run.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rStyle")
+        stylename.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", newstylename)
+        # create new style
+        newstyle.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}styleId", newstylename)
+        newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}name").set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", newstylename)
+        for format in formatting:
+          if newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr/" + format.tag) is not None:
+            currel = newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr/" + format.tag)
+            # copy over just the parts of the element that are different from the existing version
+            allchildren = format.xpath("w:*", namespaces={'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'})
+            for att in format.attrib:
+              currel.set(att, format.attrib[att])
+            for child in allchildren:
+              if currel.find(child.tag) is not None:
+                currchild = currel.find(child.tag)
+                for att in child.attrib:
+                  currchild.set(att, child.attrib[att])
+              else:
+                currel.append(child)
+          elif format.tag == "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr":
+            currel = newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr")
+            for att in format.attrib:
+              currel.set(att, node.attrib[att])
+          else:
+            newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr").append(format)
+        # add new style to list
+        stylelist = styles_root.append(newstyle)
+        modcounter += 1
+
+  return root, styles_root
+
 # add the formatting info back to the HTML as attributes on each element
 def addAttrs(html, myDict):
   root = etree.HTML(html)
@@ -118,15 +331,45 @@ def addAttrs(html, myDict):
     for para in root.findall(".//p[@class='" + style + "']"):
       for key, val in vals.items():
         para.attrib[key] = val
-  newHTML = etree.tostring(root, encoding="UTF-8", standalone=True, xml_declaration=True)
+  newHTML = etree.tostring(root, standalone=True, xml_declaration=True)
   return newHTML
 
 def sanitizeHTML(html):
   root = etree.HTML(html)
-  newHTML = etree.tostring(root, encoding="UTF-8", standalone=True, xml_declaration=True)
+  newHTML = etree.tostring(root, standalone=True, xml_declaration=True)
   return newHTML
 
-verboseAttrs = getAllStyles(docxfile)
+fobj = open(fileName,'rb')
+
+documentxml, stylesxml = getDirectFormatting(fobj)
+
+unZip(fobj)
+
+fobj.close()
+
+filePath = os.path.splitext(fobj.name)[0]
+
+docfilePath = os.path.join(filePath, "word", "document.xml")
+stylesfilePath = os.path.join(filePath, "word", "styles.xml")
+
+# write to a new document
+docfile = open(docfilePath, 'wb')
+docfile.write(etree.tostring(documentxml, encoding="UTF-8", standalone=True, xml_declaration=True))
+docfile.close()
+
+# write to a new document
+stylesfile = open(stylesfilePath, 'wb')
+stylesfile.write(etree.tostring(stylesxml, encoding="UTF-8", standalone=True, xml_declaration=True))
+stylesfile.close()
+
+newZipName = fileName + ".zip"
+
+zipDocx(filePath, newZipName)
+
+fobj = open(newZipName,'rb')
+
+#verboseAttrs = getAllStyles(docxfile)
+verboseAttrs = getAllStyles(fobj)
 
 # create the style map if requested
 if args.mapStyles == True:
@@ -146,10 +389,11 @@ if args.mapStyles == True:
   style_map = style_map + '\n"""'
 
 # convert with mammoth
-fobj = open(fileName,'rb')
 result = mammoth.convert_to_html(fobj, style_map=style_map)
 html = result.value
 messages = result.messages
+
+fobj.close()
 
 # add the verbose attributes to the output HTML if requested
 if args.preserveFormatting == True:
@@ -157,7 +401,14 @@ if args.preserveFormatting == True:
 else:
   html = sanitizeHTML(html)
 
+outputName = fileNameNoExt + ".html"
+outputPath = os.path.join(filePath, outputName)
+
 # write to a new HTML document
-output = open('output.html', 'w')
-output.write(str(html))
+output = open(outputPath, 'wb')
+output.write(html)
 output.close()
+
+# cleanup
+os.remove(newZipName)
+shutil.rmtree(filePath)
