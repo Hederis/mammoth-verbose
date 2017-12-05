@@ -3,11 +3,6 @@ from lxml import etree, objectify
 from lxml.builder import E
 from lxml.builder import ElementMaker
 import xml.etree.ElementTree as ET
-from docx import Document
-from docx.shared import Inches, Pt
-from docx.text.run import Font, Run
-from docx.enum.style import WD_STYLE_TYPE
-from docx.dml.color import ColorFormat
 import shutil
 import argparse
 import os.path
@@ -15,6 +10,7 @@ import mammoth
 import zipfile
 import inspect
 import copy
+import html
 from copy import deepcopy
 
 # function to check if the input file is valid
@@ -38,6 +34,7 @@ args = parser.parse_args()
 
 docxfile = args.filename
 fileName = docxfile.name
+fileNameNoExt = fileName.split(".")[0]
 
 # an empty dict for our ultimate parsed data
 verboseAttrs = {}
@@ -64,11 +61,12 @@ def unZip(myfile):
   return
 
 def zipDocx(path, myfile):
+  os.chdir(path)
   zf = zipfile.ZipFile(myfile, "w")
-  for dirname, subdirs, files in os.walk(path):
-      zf.write(dirname)
-      for filename in files:
-          zf.write(os.path.join(dirname, filename))
+  for dirname, subdirs, files in os.walk("."):
+    zf.write(dirname)
+    for filename in files:
+      zf.write(os.path.join(dirname, filename))
   zf.close()
   return
 
@@ -152,12 +150,6 @@ def getAllStyles(myfile):
 
   return allStyles
 
-def getAttr(self):
-  for attr in self:
-      value = getattr(format, attr, None)
-      if value != None:
-        print(attr, value)
-
 # run this function before style map and getting style defs
 def getDirectFormatting(myfile):
   myzip = makeZip(myfile)
@@ -228,14 +220,12 @@ def getDirectFormatting(myfile):
         newstyle.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type", "paragraph")
 
       # set the para stylename to the new stylename
-      print(newstylename)
       stylename = para.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pStyle")
       stylename.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", newstylename)
       # create new style
       newstyle.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}styleId", newstylename)
       newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}name").set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", newstylename)
       for format in formatting:
-        print(format.tag)
         if newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr/" + format.tag) is not None:
           currel = newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr/" + format.tag)
           # copy over just the parts of the element that are different from the existing version
@@ -303,14 +293,12 @@ def getDirectFormatting(myfile):
           newstyle.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type", "character")
 
         # set the run stylename to the new stylename
-        print(newstylename)
         stylename = run.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rStyle")
         stylename.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", newstylename)
         # create new style
         newstyle.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}styleId", newstylename)
         newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}name").set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", newstylename)
         for format in formatting:
-          print(format.tag)
           if newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr/" + format.tag) is not None:
             currel = newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr/" + format.tag)
             # copy over just the parts of the element that are different from the existing version
@@ -343,16 +331,15 @@ def addAttrs(html, myDict):
     for para in root.findall(".//p[@class='" + style + "']"):
       for key, val in vals.items():
         para.attrib[key] = val
-  newHTML = etree.tostring(root, encoding="UTF-8", standalone=True, xml_declaration=True)
+  newHTML = etree.tostring(root, standalone=True, xml_declaration=True)
   return newHTML
 
 def sanitizeHTML(html):
   root = etree.HTML(html)
-  newHTML = etree.tostring(root, encoding="UTF-8", standalone=True, xml_declaration=True)
+  newHTML = etree.tostring(root, standalone=True, xml_declaration=True)
   return newHTML
 
 fobj = open(fileName,'rb')
-document = Document(fobj)
 
 documentxml, stylesxml = getDirectFormatting(fobj)
 
@@ -376,8 +363,6 @@ stylesfile.write(etree.tostring(stylesxml, encoding="UTF-8", standalone=True, xm
 stylesfile.close()
 
 newZipName = fileName + ".zip"
-
-print(filePath)
 
 zipDocx(filePath, newZipName)
 
@@ -408,13 +393,22 @@ result = mammoth.convert_to_html(fobj, style_map=style_map)
 html = result.value
 messages = result.messages
 
+fobj.close()
+
 # add the verbose attributes to the output HTML if requested
 if args.preserveFormatting == True:
   html = addAttrs(html, verboseAttrs)
 else:
   html = sanitizeHTML(html)
 
+outputName = fileNameNoExt + ".html"
+outputPath = os.path.join(filePath, outputName)
+
 # write to a new HTML document
-output = open('output.html', 'w')
-output.write(str(html))
+output = open(outputPath, 'wb')
+output.write(html)
 output.close()
+
+# cleanup
+os.remove(newZipName)
+shutil.rmtree(filePath)
