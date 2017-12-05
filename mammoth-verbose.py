@@ -331,6 +331,9 @@ def addAttrs(html, myDict):
     for para in root.findall(".//p[@class='" + style + "']"):
       for key, val in vals.items():
         para.attrib[key] = val
+    for run in root.findall(".//span[@class='" + style + "']"):
+      for key, val in vals.items():
+        run.attrib[key] = val
   newHTML = etree.tostring(root, standalone=True, xml_declaration=True)
   return newHTML
 
