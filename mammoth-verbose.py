@@ -11,6 +11,7 @@ import zipfile
 import inspect
 import copy
 import html
+import re
 from copy import deepcopy
 
 # function to check if the input file is valid
@@ -38,6 +39,9 @@ fileNameNoExt = fileName.split(".")[0]
 
 # an empty dict for our ultimate parsed data
 verboseAttrs = {}
+
+# set our modified class name suffix
+suffix = 'HEDmod'
 
 # function to read the styles.xml file from within the docx;
 # this is used for extracting style names and formatting information.
@@ -115,8 +119,6 @@ def walkChildren(element, inputKey="data", inputVal="", inputDict={}):
 # formatting information.
 def getAllStyles(myfile):
   # parse the incoming XML
-  #myzip = makeZip(myfile)
-  #source = getWordStyles(myzip)
   source = getWordStyles(myfile)
   root = etree.fromstring(source)
 
@@ -186,7 +188,7 @@ def getDirectFormatting(myfile):
         # if there are any non-pstyle children of para_format, 
         # then proceed with modifications
         stylename = style.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val")
-        newstylename = stylename + "HEDmod" + str(modcounter)
+        newstylename = stylename + suffix + str(modcounter)
         currstyle = styles_root.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}style[@{http://schemas.openxmlformats.org/wordprocessingml/2006/main}styleId='" + stylename + "']")
         newstyle = deepcopy(currstyle)
         if newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}basedOn") is not None:
@@ -207,7 +209,7 @@ def getDirectFormatting(myfile):
         newpstyle = etree.Element(w + "pStyle", nsmap=NSMAP)
         para.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr").append(newpstyle)
 
-        newstylename = "HEDmod" + str(modcounter)
+        newstylename = suffix + str(modcounter)
         STYLEOBJ = E.style
         STYLENAMEOBJ = E.name
         PPROBJ = E.pPr
@@ -259,7 +261,7 @@ def getDirectFormatting(myfile):
           # if there are any non-pstyle children of run_format, 
           # then proceed with modifications
           stylename = style.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val")
-          newstylename = stylename + "HEDmod" + str(modcounter)
+          newstylename = stylename + suffix + str(modcounter)
           currstyle = styles_root.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}style[@{http://schemas.openxmlformats.org/wordprocessingml/2006/main}styleId='" + stylename + "']")
           newstyle = deepcopy(currstyle)
           if newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}basedOn") is not None:
@@ -280,7 +282,7 @@ def getDirectFormatting(myfile):
           newrstyle = etree.Element(w + "rStyle", nsmap=NSMAP)
           run.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr").append(newrstyle)
 
-          newstylename = "HEDmod" + str(modcounter)
+          newstylename = suffix + str(modcounter)
           STYLEOBJ = E.style
           STYLENAMEOBJ = E.name
           RPROBJ = E.rPr
@@ -322,7 +324,14 @@ def getDirectFormatting(myfile):
         stylelist = styles_root.append(newstyle)
         modcounter += 1
 
+  os.remove(myzip)
   return root, styles_root
+
+# delete the mod suffix from class names
+def deleteSuffix(root):
+  for el in root.xpath('//*[re:test(@class, "' + suffix + '[0-9]+$")]', namespaces={'re': "http://exslt.org/regular-expressions"}):
+    newclass = re.sub(r'' + suffix + '[0-9]+$', '', el.get("class"))
+    el.set("class", newclass)
 
 # add the formatting info back to the HTML as attributes on each element
 def addAttrs(html, myDict):
@@ -334,11 +343,13 @@ def addAttrs(html, myDict):
     for run in root.findall(".//span[@class='" + style + "']"):
       for key, val in vals.items():
         run.attrib[key] = val
+  deleteSuffix(root)
   newHTML = etree.tostring(root, standalone=True, xml_declaration=True)
   return newHTML
 
 def sanitizeHTML(html):
   root = etree.HTML(html)
+  deleteSuffix(root)
   newHTML = etree.tostring(root, standalone=True, xml_declaration=True)
   return newHTML
 
@@ -413,5 +424,6 @@ output.write(html)
 output.close()
 
 # cleanup
+print(newZipName)
 os.remove(newZipName)
 shutil.rmtree(filePath)
