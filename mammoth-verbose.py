@@ -424,6 +424,5 @@ output.write(html)
 output.close()
 
 # cleanup
-print(newZipName)
 os.remove(newZipName)
 shutil.rmtree(filePath)
