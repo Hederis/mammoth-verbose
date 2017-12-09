@@ -178,7 +178,26 @@ def getDirectFormatting(myfile):
 
   newstyles = []
   modcounter = 1
+
+  #create our paraid style
+  newstylename = "HED-dataID"
+  STYLEOBJ = E.style
+  STYLENAMEOBJ = E.name
+  RPROBJ = E.rPr
+
+  newstyle = STYLEOBJ(
+    STYLENAMEOBJ(),
+    RPROBJ()
+  )
+
+  newstyle.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type", "character")
+  newstyle.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}styleId", newstylename)
+  newstyle.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}name").set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", newstylename)
+  styles_root.append(newstyle)
+
   for para in root.findall(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"):
+    # get the paragraph id (for mapping back)
+    para_id = para.get("{http://schemas.microsoft.com/office/word/2010/wordml}paraId")
     # get all formatting on the P (inside pPr)
     para_format = para.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr")
     formatting = para.xpath(".//w:pPr/w:*[not(self::w:pStyle)]", namespaces={'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'})
@@ -323,9 +342,30 @@ def getDirectFormatting(myfile):
         # add new style to list
         stylelist = styles_root.append(newstyle)
         modcounter += 1
+    # add the para id onto the new stylename
+    if para.find(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pStyle") is not None:
+      newrun = etree.Element(w + "r", nsmap=NSMAP)
+      newrpr = etree.Element(w + "rPr", nsmap=NSMAP)
+      newtxt = etree.Element(w + "t", nsmap=NSMAP)
+      newrstyle = etree.Element(w + "rStyle", nsmap=NSMAP)
 
+      newrstyle.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", "HED-dataID")
+      newtxt.text = para_id
+      newrpr.append(newrstyle)
+      newrun.append(newrpr)
+      newrun.append(newtxt)
+      para.append(newrun)
+             
   os.remove(myzip)
   return root, styles_root
+
+def addID(root):
+  for run in root.findall('.//span[@class="HED-dataID"]'):
+    myid = run.text
+    myparent = run.getparent()
+    myparent.set("data-source-id", myid)
+    myparent.remove(run)
+  return root
 
 # delete the mod suffix from class names
 def deleteSuffix(root):
@@ -336,6 +376,7 @@ def deleteSuffix(root):
 # add the formatting info back to the HTML as attributes on each element
 def addAttrs(html, myDict):
   root = etree.HTML(html)
+  root = addID(root)
   for style, vals in myDict.items():
     for para in root.findall(".//p[@class='" + style + "']"):
       for key, val in vals.items():
@@ -349,6 +390,7 @@ def addAttrs(html, myDict):
 
 def sanitizeHTML(html):
   root = etree.HTML(html)
+  root = addID(root)
   deleteSuffix(root)
   newHTML = etree.tostring(root, standalone=True, xml_declaration=True)
   return newHTML
